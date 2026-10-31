@@ -152,11 +152,11 @@
       <!-- 3. Unir formatos -->
       <div class="feature-card bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden" data-modal="modalAll">
         <div class="bg-gradient-to-r from-purple-500 to-pink-600 p-4">
-          <h2 class="text-white text-lg font-bold flex items-center"><i class="fas fa-sync-alt mr-2"></i> Unir formatos</h2>
+          <h2 class="text-white text-lg font-bold flex items-center"><i class="fas fa-sync-alt mr-2"></i> Unir diferentes formatos</h2>
         </div>
         <div class="p-4 text-center">
           <i class="fas fa-chevron-right text-purple-500 text-2xl mb-2"></i>
-          <p class="text-gray-600 text-sm">PDF, imágenes, texto → PDF unificado</p>
+          <p class="text-gray-600 text-sm">PDF, jpg, png, doc, texto → PDF dif. unificado</p>
           <span class="inline-block mt-2 text-purple-600 font-medium text-sm">Abrir herramienta →</span>
         </div>
       </div>
@@ -339,7 +339,7 @@
         <label for="allFiles" class="bg-purple-600 hover:bg-purple-700 text-white font-medium py-3 px-6 rounded-xl inline-block cursor-pointer transition-colors shadow-md">
           <i class="fas fa-file-import mr-2"></i>Seleccionar archivos
         </label>
-        <p class="text-gray-500 mt-2 text-sm">PDF, Imágenes, Texto (puedes añadir en varias tandas)</p>
+        <p class="text-gray-500 mt-2 text-sm">PDF, Imágenes, Texto, Word .docx (puedes añadir en varias tandas)</p>
         <input type="file" id="allFiles" multiple class="file-input">
       </div>
       <div class="mb-4">
@@ -660,6 +660,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/signature_pad/1.5.3/signature_pad.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 
   <script>
     // ============================================================
@@ -904,7 +906,7 @@
     }
 
     // ============================================================
-    // 3. UNIR FORMATOS (CORREGIDO)
+    // 3. UNIR FORMATOS (CON SOPORTE WORD .docx)
     // ============================================================
     let bufAll = [];
     let useWatermark = true;
@@ -925,17 +927,31 @@
         const ext = f.name.split('.').pop().toLowerCase();
         try {
           let pdfBytes = null;
-          if (ext === 'pdf') pdfBytes = await f.arrayBuffer();
-          else if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) pdfBytes = await img2pdf(f);
-          else if (ext === 'txt') pdfBytes = await txt2pdf(f);
-          
+          if (ext === 'pdf') {
+            pdfBytes = await f.arrayBuffer();
+          } else if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) {
+            pdfBytes = await img2pdf(f);
+          } else if (ext === 'txt') {
+            pdfBytes = await txt2pdf(f);
+          } else if (ext === 'docx') {
+            log(logId, `🐌 Convirtiendo ${f.name} (Word → PDF, puede tardar)...`);
+            pdfBytes = await docx2pdf(f, logId);
+          } else if (ext === 'doc') {
+            log(logId, `⚠️ ${f.name}: formato .doc antiguo no soportado. Conviértelo a .docx`);
+          }
+
           if (pdfBytes) {
-            // CORREGIDO: ignoreEncryption en stampPdf y en la conversión
             let finalBytes = useWatermark ? await stampPdf(pdfBytes, f.name.replace(/\.[^.]+$/, ''), 'center').catch(()=>pdfBytes) : pdfBytes;
             bufAll.push(finalBytes);
             log(logId, `➕ ${f.name}`);
+          } else if (ext === 'doc') {
+            // ya avisado arriba
+          } else {
+            log(logId, `⚠️ ${f.name}: formato no soportado.`);
           }
-        } catch (err) { log(logId, `❌ Error en ${f.name}`); }
+        } catch (err) {
+          log(logId, `❌ Error en ${f.name}: ${err.message}`);
+        }
         setProg('progAll', 'pctAll', ((i+1) / files.length) * 100);
       }
       updateCounterAll();
@@ -946,7 +962,6 @@
       const logId = 'logAll';
       log(logId, `⏳ Uniendo ${bufAll.length} archivos...`);
       try {
-        // CORREGIDO: mergePdfs ahora usa ignoreEncryption
         const mergedBytes = await mergePdfs(bufAll);
         if (!mergedBytes || mergedBytes.byteLength === 0) {
           throw new Error('El PDF unificado está vacío.');
@@ -957,7 +972,7 @@
     });
 
     // ============================================================
-    // 4. CARPETA A PDF NUMERADO (CORREGIDO)
+    // 4. CARPETA A PDF NUMERADO
     // ============================================================
     let folderFiles = [];
     setupZone('zoneNum', 'numFolder', async files => {
@@ -991,7 +1006,6 @@
           else if (ext === 'txt') pdfBytes = await txt2pdf(file);
           else continue;
 
-          // CORREGIDO: ignoreEncryption
           const srcPdf = await PDFLib.PDFDocument.load(pdfBytes, { ignoreEncryption: true });
           const srcPages = srcPdf.getPages();
 
@@ -1164,7 +1178,7 @@
     });
 
     // ============================================================
-    // 9. FIRMA VISUAL (CORREGIDO)
+    // 9. FIRMA VISUAL
     // ============================================================
     const canvas = $('signatureCanvas');
     let signaturePad = canvas ? new SignaturePad(canvas, { minWidth: 2, maxWidth: 4 }) : null;
@@ -1207,7 +1221,6 @@
 
       try {
         const pdfBytes = await signPdfFile.arrayBuffer();
-        // CORREGIDO: ignoreEncryption
         const pdfDoc = await PDFLib.PDFDocument.load(pdfBytes, { ignoreEncryption: true });
         const image = await pdfDoc.embedPng(await signatureBlob.arrayBuffer());
         const applyAll = $('signAllPages').checked;
@@ -1234,10 +1247,9 @@
     });
 
     // ============================================================
-    // FUNCIONES AUXILIARES (pdf-lib) - CORREGIDAS
+    // FUNCIONES AUXILIARES (pdf-lib)
     // ============================================================
     async function stampPdf(pdfBytes, texto, align) {
-      // CORREGIDO: ignoreEncryption
       const pdf = await PDFLib.PDFDocument.load(pdfBytes, { ignoreEncryption: true });
       const font = await pdf.embedFont(PDFLib.StandardFonts.HelveticaBold);
       pdf.getPages().forEach(page => {
@@ -1252,14 +1264,12 @@
       let loadedCount = 0;
       for (const bytes of arrBytes) {
         try {
-          // CORREGIDO: ignoreEncryption
           const doc = await PDFLib.PDFDocument.load(bytes, { ignoreEncryption: true });
           const copied = await merged.copyPages(doc, doc.getPageIndices());
           copied.forEach(p => merged.addPage(p));
           loadedCount++;
         } catch (e) {
           console.warn('⚠️ Error cargando un PDF (se omite):', e.message);
-          // No lanzamos error, seguimos con el siguiente
         }
       }
       if (loadedCount === 0) {
@@ -1291,7 +1301,161 @@
       return await pdf.save();
     }
 
-    console.log('✅ ServiPDF Pro cargado con soporte para PDFs encriptados.');
+    // ============================================================
+    // NUEVA: docx2pdf (Word .docx → PDF con fidelidad visual)
+    // Estrategia: mammoth (docx→HTML) + html2canvas (HTML→canvas)
+    //             + paginación manual A4 con pdf-lib
+    // ============================================================
+    async function docx2pdf(f, logId) {
+      if (typeof mammoth === 'undefined') {
+        throw new Error('Librería mammoth no cargada (comprueba tu conexión)');
+      }
+      if (typeof html2canvas === 'undefined') {
+        throw new Error('Librería html2canvas no cargada (comprueba tu conexión)');
+      }
+
+      // 1) .docx → HTML con imágenes embebidas (data URLs)
+      const arrayBuffer = await f.arrayBuffer();
+      const result = await mammoth.convertToHtml({ arrayBuffer });
+      const html = result.value || '';
+      if (!html.trim()) throw new Error('Documento Word vacío o sin contenido convertible');
+      if (logId && result.messages?.length) {
+        const warns = result.messages
+          .filter(m => m.type === 'warning' || m.type === 'error')
+          .slice(0, 3)
+          .map(m => m.message)
+          .join(' | ');
+        if (warns) log(logId, `   ℹ️ Avisos mammoth: ${warns}`);
+      }
+
+      // 2) Contenedor oculto con estilos que imitan un folio A4
+      const container = document.createElement('div');
+      container.style.cssText = `
+        position: absolute;
+        left: -99999px;
+        top: 0;
+        width: 794px;
+        padding: 48px 56px;
+        background: #ffffff;
+        color: #111111;
+        font-family: Arial, Helvetica, sans-serif;
+        font-size: 12pt;
+        line-height: 1.5;
+        box-sizing: border-box;
+      `;
+      container.innerHTML = html;
+
+      // Estilos extra para tablas, imágenes, títulos…
+      const extraStyle = document.createElement('style');
+      extraStyle.textContent = `
+        .docx-render table { border-collapse: collapse; width: 100%; margin: 10px 0; }
+        .docx-render th, .docx-render td { border: 1px solid #999; padding: 6px 10px; vertical-align: top; }
+        .docx-render img { max-width: 100%; height: auto; display: block; margin: 8px 0; }
+        .docx-render h1 { font-size: 20pt; margin: 16px 0 10px; font-weight: bold; }
+        .docx-render h2 { font-size: 16pt; margin: 14px 0 8px; font-weight: bold; }
+        .docx-render h3 { font-size: 14pt; margin: 12px 0 6px; font-weight: bold; }
+        .docx-render h4 { font-size: 12pt; margin: 10px 0 4px; font-weight: bold; }
+        .docx-render p { margin: 0 0 10px 0; }
+        .docx-render ul, .docx-render ol { margin: 6px 0 10px 22px; padding: 0; }
+        .docx-render li { margin: 2px 0; }
+        .docx-render blockquote { margin: 8px 0 8px 20px; padding-left: 12px; border-left: 3px solid #ccc; color: #444; }
+        .docx-render code { background: #f2f2f2; padding: 1px 4px; border-radius: 3px; font-family: monospace; }
+        .docx-render pre { background: #f2f2f2; padding: 8px; border-radius: 4px; overflow-x: auto; }
+      `;
+      container.className = 'docx-render';
+
+      document.head.appendChild(extraStyle);
+      document.body.appendChild(container);
+
+      let pdfBytes;
+      try {
+        // 3) HTML → canvas
+        if (logId) log(logId, '   ↳ Renderizando HTML a canvas...');
+        const canvas = await html2canvas(container, {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: '#ffffff',
+          logging: false,
+          windowWidth: container.scrollWidth,
+          windowHeight: container.scrollHeight
+        });
+
+        if (!canvas || canvas.width === 0 || canvas.height === 0) {
+          throw new Error('html2canvas devolvió un canvas vacío');
+        }
+
+        // 4) Convertir la primera imagen completa
+        const fullDataUrl = canvas.toDataURL('image/jpeg', 0.92);
+        const fullBytes = await (await fetch(fullDataUrl)).arrayBuffer();
+
+        // 5) Crear PDF A4 y paginar
+        const pdfDoc = await PDFLib.PDFDocument.create();
+        const A4_W = 595.28; // puntos
+        const A4_H = 841.89;
+        const fullImg = await pdfDoc.embedJpg(fullBytes);
+
+        // ¿Cabe en una sola página?
+        const imgW = A4_W;
+        const imgH = (canvas.height * A4_W) / canvas.width;
+
+        if (imgH <= A4_H + 1) {
+          // Página única
+          const page = pdfDoc.addPage([A4_W, A4_H]);
+          page.drawImage(fullImg, {
+            x: 0,
+            y: A4_H - imgH, // alineado arriba
+            width: imgW,
+            height: imgH
+          });
+        } else {
+          // Varias páginas: rebanamos el canvas horizontalmente
+          const pageHeightCanvasPx = (A4_H * canvas.width) / A4_W;
+          let yOffset = 0;
+          let pageNum = 0;
+
+          while (yOffset < canvas.height - 1) {
+            const remaining = canvas.height - yOffset;
+            const sliceH = Math.min(pageHeightCanvasPx, remaining);
+
+            // Canvas recortado
+            const sliceCanvas = document.createElement('canvas');
+            sliceCanvas.width = canvas.width;
+            sliceCanvas.height = sliceH;
+            const sCtx = sliceCanvas.getContext('2d');
+            sCtx.fillStyle = '#ffffff';
+            sCtx.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
+            sCtx.drawImage(canvas, 0, yOffset, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
+
+            const sliceDataUrl = sliceCanvas.toDataURL('image/jpeg', 0.92);
+            const sliceBytes = await (await fetch(sliceDataUrl)).arrayBuffer();
+            const sliceImg = await pdfDoc.embedJpg(sliceBytes);
+
+            const page = pdfDoc.addPage([A4_W, A4_H]);
+            const drawH = (sliceH * A4_W) / canvas.width;
+            page.drawImage(sliceImg, {
+              x: 0,
+              y: A4_H - drawH,
+              width: A4_W,
+              height: drawH
+            });
+
+            yOffset += sliceH;
+            pageNum++;
+          }
+          if (logId) log(logId, `   ↳ ${pageNum} página(s) generadas`);
+        }
+
+        pdfBytes = await pdfDoc.save();
+      } finally {
+        // 6) Limpieza
+        if (container.parentNode) container.parentNode.removeChild(container);
+        if (extraStyle.parentNode) extraStyle.parentNode.removeChild(extraStyle);
+      }
+
+      return pdfBytes;
+    }
+
+    console.log('✅ ServiPDF Pro cargado con soporte para PDFs encriptados y documentos Word .docx.');
   </script>
 </body>
 </html>
